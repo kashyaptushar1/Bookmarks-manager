@@ -1,270 +1,271 @@
-import { useState, useMemo, useEffect, useRef } from "react";
-import { Search, Link as LinkIcon } from "lucide-react";
+import { useState, useMemo, useCallback } from "react";
+import { Link as LinkIcon, Download, Upload, Moon, Sun, Plus, Search, Menu, GripVertical } from "lucide-react";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { toast } from "sonner";
 import { LinkCard } from "@/components/LinkCard";
 import { AddLinkDialog } from "@/components/AddLinkDialog";
-import { CollectionSidebar } from "@/components/CollectionSidebar";
-import { collections as initialCollections } from "@/data/mock-data";
-import { LinkItem } from "@/types/link";
-import { usePersistedLinks } from "@/hooks/usePersistedLinks";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { CollectionsDrawer } from "@/components/CollectionsDrawer";
+import { CollectionsSidebar } from "@/components/CollectionsSidebar";
+import { Link } from "@/lib/types";
+import { getLinks, saveLinks, getCollections, exportLinks, importLinks } from "@/lib/store";
+import { useToast } from "@/hooks/use-toast";
+import { useReminders } from "@/hooks/useReminders";
 
-const Index = () => {
-  const [links, setLinks] = usePersistedLinks();
-  const [activeCollection, setActiveCollection] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showFavorites, setShowFavorites] = useState(false);
-  const firedReminders = useRef<Set<string>>(new Set());
+export default function Index() {
+  const [links, setLinks] = useState<Link[]>(getLinks);
+  const [search, setSearch] = useState("");
+  const [activeCollection, setActiveCollection] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [collectionsOpen, setCollectionsOpen] = useState(false);
+  const [editingLink, setEditingLink] = useState<Link | null>(null);
+  const [isDark, setIsDark] = useState(false);
+  const { toast } = useToast();
+  useReminders(links);
 
-  // Request notification permission on mount
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission().then((perm) => {
-        console.log("Notification permission:", perm);
-      });
-    }
+  const persist = useCallback((updated: Link[]) => {
+    setLinks(updated);
+    saveLinks(updated);
   }, []);
 
-  // Register Service Worker (skip in iframes/preview)
-  useEffect(() => {
-    const isInIframe = (() => {
-      try { return window.self !== window.top; } catch { return true; }
-    })();
-    const isPreview = window.location.hostname.includes("id-preview--") || window.location.hostname.includes("lovableproject.com");
+  const collections = useMemo(() => getCollections(links), [links]);
+  const collectionNames = useMemo(
+    () => [...new Set(links.map((l) => l.collection))],
+    [links]
+  );
+  const favoritesCount = useMemo(() => links.filter((l) => l.isFavorite).length, [links]);
 
-    if (isInIframe || isPreview) {
-      // Unregister any existing SW in preview
-      navigator.serviceWorker?.getRegistrations().then((regs) => {
-        regs.forEach((r) => r.unregister());
-      });
-      return;
-    }
-
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").then((reg) => {
-        console.log("SW registered", reg.scope);
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = new Date();
-      setLinks((prevLinks) => {
-        let updated = false;
-        const newLinks = prevLinks.map((link) => {
-          if (
-            link.remindAt &&
-            new Date(link.remindAt) <= now &&
-            !firedReminders.current.has(link.id + "-" + link.remindAt)
-          ) {
-            firedReminders.current.add(link.id + "-" + link.remindAt);
-
-            // Fire browser notification via SW registration
-            if ("Notification" in window && Notification.permission === "granted") {
-              navigator.serviceWorker?.ready.then((reg) => {
-                reg.showNotification(`⏰ ${link.title}`, {
-                  body: link.description || `Time to open: ${link.url}`,
-                  icon: "/placeholder.svg",
-                  tag: link.id,
-                  data: { url: link.url },
-                  requireInteraction: true,
-                });
-              }).catch(() => {
-                // Fallback to basic notification
-                new Notification(`⏰ ${link.title}`, {
-                  body: link.description || `Time to open: ${link.url}`,
-                  tag: link.id,
-                });
-              });
-            }
-
-            // Also show in-app toast
-            toast(`⏰ Alarm: "${link.title}"`, {
-              description: link.description || link.url,
-              action: {
-                label: "Open Link",
-                onClick: () => window.open(link.url, "_blank"),
-              },
-              duration: 30000,
-            });
-
-            // If daily, schedule next alarm for tomorrow
-            if (link.alarmDaily && link.alarmTime && link.alarmPeriod) {
-              const [h, m] = link.alarmTime.split(":").map(Number);
-              let hour24 = h;
-              if (link.alarmPeriod === "AM" && hour24 === 12) hour24 = 0;
-              if (link.alarmPeriod === "PM" && hour24 !== 12) hour24 += 12;
-
-              const nextAlarm = new Date();
-              nextAlarm.setDate(nextAlarm.getDate() + 1);
-              nextAlarm.setHours(hour24, m, 0, 0);
-
-              updated = true;
-              return { ...link, remindAt: nextAlarm };
-            }
-
-            // One-time alarm: clear it
-            updated = true;
-            return { ...link, remindAt: undefined };
-          }
-          return link;
-        });
-        return updated ? newLinks : prevLinks;
-      });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const collections = useMemo(() => {
-    return initialCollections.map((c) => ({
-      ...c,
-      count:
-        c.id === "all"
-          ? links.length
-          : links.filter((l) => l.collectionId === c.id).length,
-    }));
-  }, [links]);
-
-  const favoriteCount = links.filter((l) => l.isFavorite).length;
-
-  const filteredLinks = useMemo(() => {
+  const filtered = useMemo(() => {
     let result = links;
-    if (showFavorites) {
+    if (activeCollection === "__favorites") {
       result = result.filter((l) => l.isFavorite);
-    } else if (activeCollection !== "all") {
-      result = result.filter((l) => l.collectionId === activeCollection);
+    } else if (activeCollection) {
+      result = result.filter((l) => l.collection === activeCollection);
     }
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+    if (search.trim()) {
+      const q = search.toLowerCase();
       result = result.filter(
         (l) =>
           l.title.toLowerCase().includes(q) ||
-          l.url.toLowerCase().includes(q) ||
-          l.tags.some((t) => t.toLowerCase().includes(q))
+          l.tags.some((t) => t.toLowerCase().includes(q)) ||
+          l.url.toLowerCase().includes(q)
       );
     }
-    // Sort: pinned first, then by creation date
-    return [...result].sort((a, b) => {
-      if (a.isPinned && !b.isPinned) return -1;
-      if (!a.isPinned && b.isPinned) return 1;
+    return result.sort((a, b) => {
+      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+      if (a.order !== undefined && b.order !== undefined) return a.order - b.order;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [links, activeCollection, searchQuery, showFavorites]);
+  }, [links, activeCollection, search]);
 
-  const handleAdd = (link: LinkItem) => {
-    setLinks((prev) => [link, ...prev]);
-    // Schedule alarm in service worker
-    if (link.remindAt && "serviceWorker" in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: "SCHEDULE_ALARM",
-        id: link.id,
-        title: link.title,
-        description: link.description,
-        url: link.url,
-        remindAt: link.remindAt,
-      });
+  const handleSave = (data: Omit<Link, "id" | "createdAt">) => {
+    if (editingLink) {
+      persist(links.map((l) => (l.id === editingLink.id ? { ...l, ...data } : l)));
+    } else {
+      persist([...links, { ...data, id: crypto.randomUUID(), createdAt: new Date().toISOString() }]);
     }
+    setEditingLink(null);
   };
 
-  const handleToggleFavorite = (id: string) => {
-    setLinks((prev) =>
-      prev.map((l) => (l.id === id ? { ...l, isFavorite: !l.isFavorite } : l))
-    );
+  const toggleFavorite = (id: string) =>
+    persist(links.map((l) => (l.id === id ? { ...l, isFavorite: !l.isFavorite } : l)));
+
+  const togglePin = (id: string) =>
+    persist(links.map((l) => (l.id === id ? { ...l, isPinned: !l.isPinned } : l)));
+
+  const deleteLink = (id: string) => persist(links.filter((l) => l.id !== id));
+
+  const handleDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    const srcIdx = result.source.index;
+    const destIdx = result.destination.index;
+    if (srcIdx === destIdx) return;
+
+    const reordered = Array.from(filtered);
+    const [moved] = reordered.splice(srcIdx, 1);
+    reordered.splice(destIdx, 0, moved);
+
+    // Assign order to all items in filtered view
+    const orderMap = new Map<string, number>();
+    reordered.forEach((item, i) => orderMap.set(item.id, i));
+
+    persist(links.map((l) => orderMap.has(l.id) ? { ...l, order: orderMap.get(l.id)! } : l));
   };
 
-  const handleDelete = (id: string) => {
-    setLinks((prev) => prev.filter((l) => l.id !== id));
+  const handleExport = () => {
+    const blob = new Blob([exportLinks(links)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "linkstash-export.json";
+    a.click();
+    toast({ title: "Exported!", description: `${links.length} links exported.` });
   };
 
-  const handleEdit = (updated: LinkItem) => {
-    setLinks((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+  const handleImport = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const imported = importLinks(reader.result as string);
+        if (imported) {
+          persist([...links, ...imported.map((l) => ({ ...l, id: crypto.randomUUID() }))]);
+          toast({ title: "Imported!", description: `${imported.length} links imported.` });
+        } else {
+          toast({ title: "Error", description: "Invalid file format.", variant: "destructive" });
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   };
 
-  const handleTogglePin = (id: string) => {
-    setLinks((prev) => prev.map((l) => (l.id === id ? { ...l, isPinned: !l.isPinned } : l)));
+  const toggleDark = () => {
+    setIsDark((v) => !v);
+    document.documentElement.classList.toggle("dark");
   };
 
-  const activeTitle = showFavorites
-    ? "Favorites"
-    : collections.find((c) => c.id === activeCollection)?.name || "All Links";
+  const displayTitle = activeCollection === "__favorites" ? "Favorites" : activeCollection || "All Links";
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <CollectionSidebar
+    <div className="min-h-screen bg-background flex">
+      {/* Desktop sidebar */}
+      <CollectionsSidebar
         collections={collections}
-        activeId={activeCollection}
+        activeCollection={activeCollection}
         onSelect={setActiveCollection}
-        showFavorites={showFavorites}
-        onToggleFavorites={() => setShowFavorites((f) => !f)}
-        favoriteCount={favoriteCount}
+        totalLinks={links.length}
+        favoritesCount={favoritesCount}
       />
 
-      <main className="flex-1 px-4 py-6 md:px-8 md:py-8 max-w-4xl">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-3">
-            <LinkIcon className="h-6 w-6 text-primary" />
-            <h1 className="font-heading text-2xl font-bold text-foreground tracking-tight">
-              LinkStash
-            </h1>
-          </div>
-          <ThemeToggle />
-        </div>
-        <p className="text-sm text-muted-foreground mb-6">
-          Your personal bookmark manager
-        </p>
-
-        {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search links, tags..."
-              className="pl-9"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <AddLinkDialog activeCollection={activeCollection} onAdd={handleAdd} />
-        </div>
-
-        {/* Section title */}
-        <h2 className="font-heading text-lg font-semibold text-foreground mb-4">
-          {activeTitle}
-          <span className="ml-2 text-sm font-normal text-muted-foreground">
-            ({filteredLinks.length})
-          </span>
-        </h2>
-
-        {/* Links Grid */}
-        {filteredLinks.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {filteredLinks.map((link) => (
-              <LinkCard
-                key={link.id}
-                link={link}
-                onToggleFavorite={handleToggleFavorite}
-                onDelete={handleDelete}
-                onEdit={handleEdit}
-                onTogglePin={handleTogglePin}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="rounded-full bg-muted p-4 mb-4">
-              <LinkIcon className="h-8 w-8 text-muted-foreground" />
+      {/* Main content */}
+      <div className="flex-1 min-w-0">
+        <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm">
+          <div className="flex items-center justify-between px-4 lg:px-8 py-4">
+            <div className="flex items-center gap-2">
+              <LinkIcon className="h-6 w-6 text-primary" />
+              <h1 className="text-xl font-bold font-display text-foreground">LinkStash</h1>
             </div>
-            <p className="text-muted-foreground text-sm">
-              {searchQuery ? "No links match your search" : "No links yet. Add your first one!"}
-            </p>
+            <div className="flex items-center gap-1">
+              <button onClick={handleExport} className="rounded-full p-2 hover:bg-muted transition-colors">
+                <Download className="h-5 w-5 text-muted-foreground" />
+              </button>
+              <button onClick={handleImport} className="rounded-full p-2 hover:bg-muted transition-colors">
+                <Upload className="h-5 w-5 text-muted-foreground" />
+              </button>
+              <button onClick={toggleDark} className="rounded-full p-2 hover:bg-muted transition-colors">
+                {isDark ? <Sun className="h-5 w-5 text-muted-foreground" /> : <Moon className="h-5 w-5 text-muted-foreground" />}
+              </button>
+            </div>
           </div>
-        )}
-      </main>
+        </header>
+
+        <main className="px-4 lg:px-8 py-6 pb-24">
+          <p className="text-sm text-muted-foreground mb-5">Your personal bookmark manager</p>
+
+          {/* Mobile collections button */}
+          <button
+            onClick={() => setCollectionsOpen(true)}
+            className="lg:hidden mb-3 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+          >
+            <Menu className="h-4 w-4" />
+            Collections
+          </button>
+
+          {/* Search + Add row */}
+          <div className="flex items-center gap-3 mb-6">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search links, tags..."
+                className="pl-9"
+              />
+            </div>
+            <Button
+              onClick={() => { setEditingLink(null); setAddOpen(true); }}
+              size="lg"
+              className="shrink-0"
+            >
+              <Plus className="mr-2 h-4 w-4" /> Add Link
+            </Button>
+          </div>
+
+          <h2 className="mb-4 text-lg font-bold text-foreground">
+            {displayTitle} <span className="font-normal text-muted-foreground">({filtered.length})</span>
+          </h2>
+
+          {/* Drag & drop grid */}
+          <DragDropContext onDragEnd={handleDragEnd}>
+            <Droppable droppableId="links-grid">
+              {(provided) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                >
+                  {filtered.map((link, index) => (
+                    <Draggable key={link.id} draggableId={link.id} index={index}>
+                      {(provided, snapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.draggableProps}
+                          className={snapshot.isDragging ? "opacity-90 shadow-lg rounded-lg" : ""}
+                        >
+                          <div className="relative group">
+                            <div
+                              {...provided.dragHandleProps}
+                              className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing hidden md:flex"
+                            >
+                              <GripVertical className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                            <LinkCard
+                              link={link}
+                              onToggleFavorite={toggleFavorite}
+                              onTogglePin={togglePin}
+                              onDelete={deleteLink}
+                              onEdit={(l) => { setEditingLink(l); setAddOpen(true); }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </Draggable>
+                  ))}
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          </DragDropContext>
+          {filtered.length === 0 && (
+            <div className="py-16 text-center text-muted-foreground">
+              <LinkIcon className="mx-auto mb-3 h-10 w-10 opacity-30" />
+              <p>No links found</p>
+            </div>
+          )}
+        </main>
+      </div>
+
+      <AddLinkDialog
+        open={addOpen}
+        onClose={() => { setAddOpen(false); setEditingLink(null); }}
+        onSave={handleSave}
+        editingLink={editingLink}
+        collections={collectionNames}
+      />
+
+      <CollectionsDrawer
+        open={collectionsOpen}
+        onClose={() => setCollectionsOpen(false)}
+        collections={collections}
+        activeCollection={activeCollection}
+        onSelect={setActiveCollection}
+        totalLinks={links.length}
+        favoritesCount={favoritesCount}
+      />
     </div>
   );
-};
-
-export default Index;
+}

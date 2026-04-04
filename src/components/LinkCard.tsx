@@ -1,142 +1,107 @@
-import { useState } from "react";
-import { ExternalLink, Heart, MoreHorizontal, Trash2, Bell, Repeat, Pencil, Copy, Pin } from "lucide-react";
-import { LinkItem } from "@/types/link";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
+import { Heart, MoreHorizontal, Pin, ExternalLink, Trash2, Edit, Bell } from "lucide-react";
+import { Link } from "@/lib/types";
+import { getDomain, getFaviconUrl } from "@/lib/store";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { EditLinkDialog } from "@/components/EditLinkDialog";
 
 interface LinkCardProps {
-  link: LinkItem;
+  link: Link;
   onToggleFavorite: (id: string) => void;
-  onDelete: (id: string) => void;
-  onEdit: (updated: LinkItem) => void;
   onTogglePin: (id: string) => void;
+  onDelete: (id: string) => void;
+  onEdit: (link: Link) => void;
 }
 
-export function LinkCard({ link, onToggleFavorite, onDelete, onEdit, onTogglePin }: LinkCardProps) {
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showEditDialog, setShowEditDialog] = useState(false);
-
-  const domain = new URL(link.url).hostname.replace("www.", "");
-
-  const handleCopyUrl = () => {
-    navigator.clipboard.writeText(link.url);
-    toast.success("URL copied to clipboard!");
-  };
-
+export function LinkCard({ link, onToggleFavorite, onTogglePin, onDelete, onEdit }: LinkCardProps) {
   return (
-    <>
-      <div className={`group rounded-lg border bg-card p-4 shadow-card transition-all duration-200 hover:shadow-card-hover hover:border-primary/20 animate-fade-in ${link.isPinned ? "border-primary/40 ring-1 ring-primary/20" : "border-border"}`}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0 flex-1">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-              {link.favicon ? (
-                <img src={link.favicon} alt="" className="h-4 w-4 rounded-sm" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-              ) : (
-                <ExternalLink className="h-4 w-4 text-muted-foreground" />
-              )}
-            </div>
-            <div className="min-w-0 flex-1">
-              <a href={link.url} target="_blank" rel="noopener noreferrer" className="font-heading text-sm font-semibold text-foreground hover:text-primary transition-colors line-clamp-1">
+    <div className="group rounded-lg border border-border bg-card p-4 transition-all hover:shadow-md hover:border-primary/30 animate-fade-in">
+      <div className="flex items-start gap-3">
+        <img
+          src={getFaviconUrl(link.url)}
+          alt=""
+          className="mt-1 h-8 w-8 rounded-md bg-muted p-1"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = "/placeholder.svg";
+          }}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <a
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-card-foreground truncate block hover:text-primary transition-colors cursor-pointer"
+              >
                 {link.title}
               </a>
-              <p className="mt-0.5 text-xs text-muted-foreground">{domain}</p>
-              {link.isPinned && (
-                <p className="mt-0.5 flex items-center gap-1 text-[10px] text-primary">
-                  <Pin className="h-2.5 w-2.5" /> Pinned
-                </p>
-              )}
-              {link.alarmTime && link.alarmPeriod && (
-                <p className="mt-0.5 flex items-center gap-1 text-[10px] text-primary">
-                  <Bell className="h-3 w-3" />
-                  {link.alarmTime} {link.alarmPeriod}
-                  {link.alarmDaily && (
-                    <span className="flex items-center gap-0.5 text-accent">
-                      <Repeat className="h-2.5 w-2.5" /> Daily
-                    </span>
-                  )}
-                </p>
-              )}
+              <p className="text-sm text-muted-foreground">{getDomain(link.url)}</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {link.isPinned && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-pinned">
+                    <Pin className="h-3 w-3" /> Pinned
+                  </span>
+                )}
+                {link.reminder && new Date(link.reminder) > new Date() && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+                    <Bell className="h-3 w-3" /> {new Date(link.reminder).toLocaleString()}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => onToggleFavorite(link.id)}
+                className="rounded-full p-1.5 transition-colors hover:bg-muted"
+              >
+                <Heart
+                  className={`h-4 w-4 ${link.isFavorite ? "fill-favorite text-favorite" : "text-muted-foreground"}`}
+                />
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="rounded-full p-1.5 transition-colors hover:bg-muted">
+                    <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => window.open(link.url, "_blank")}>
+                    <ExternalLink className="mr-2 h-4 w-4" /> Open
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onEdit(link)}>
+                    <Edit className="mr-2 h-4 w-4" /> Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onTogglePin(link.id)}>
+                    <Pin className="mr-2 h-4 w-4" /> {link.isPinned ? "Unpin" : "Pin"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onDelete(link.id)} className="text-destructive">
+                    <Trash2 className="mr-2 h-4 w-4" /> Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
-
-          <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => onToggleFavorite(link.id)} className="rounded-md p-1.5 text-muted-foreground transition-colors hover:text-accent">
-              <Heart className={`h-3.5 w-3.5 ${link.isFavorite ? "fill-accent text-accent" : ""}`} />
-            </button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="rounded-md p-1.5 text-muted-foreground transition-colors hover:text-foreground">
-                  <MoreHorizontal className="h-3.5 w-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setShowEditDialog(true)}>
-                  <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleCopyUrl}>
-                  <Copy className="mr-2 h-3.5 w-3.5" /> Copy URL
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onTogglePin(link.id)}>
-                  <Pin className="mr-2 h-3.5 w-3.5" /> {link.isPinned ? "Unpin" : "Pin to Top"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive" onClick={() => setShowDeleteDialog(true)}>
-                  <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          {link.description && (
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2">{link.description}</p>
+          )}
+          {link.tags.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {link.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-tag px-2.5 py-0.5 text-xs font-medium text-tag-foreground"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-
-        {link.description && (
-          <p className="mt-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed">{link.description}</p>
-        )}
-
-        {link.tags.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {link.tags.map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-[10px] font-medium px-2 py-0.5">{tag}</Badge>
-            ))}
-          </div>
-        )}
       </div>
-
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this link?</AlertDialogTitle>
-            <AlertDialogDescription>
-              "{link.title}" will be permanently removed. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { onDelete(link.id); toast.success("Link deleted"); }}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <EditLinkDialog link={link} open={showEditDialog} onOpenChange={setShowEditDialog} onSave={onEdit} />
-    </>
+    </div>
   );
 }
